@@ -179,6 +179,41 @@ Resources:
         - { Key: projeto, Value: glue-pd }
 
   # ------------------------------------------------------------------ Glue Data Catalog
+  DataBrewRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Prefixo}-databrew-role"
+      Description: Role do AWS Glue DataBrew (perfilamento e deteccao de PII). Le Bronze e Silver, grava so em databrew/.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: databrew.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSGlueDataBrewServiceRole"
+      Policies:
+        - PolicyName: acesso-datalake-databrew
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ListarBucket
+                Effect: Allow
+                Action: [s3:ListBucket, s3:GetBucketLocation]
+                Resource: !GetAtt DataLakeBucket.Arn
+              - Sid: LerBronzeESilver
+                Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub "${DataLakeBucket.Arn}/bronze/*"
+                  - !Sub "${DataLakeBucket.Arn}/silver/*"
+              - Sid: GravarResultadosDataBrew
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub "${DataLakeBucket.Arn}/databrew/*"
+      Tags:
+        - { Key: projeto, Value: glue-pd }
+
   BronzeDatabase:
     Type: AWS::Glue::Database
     Properties:
@@ -312,6 +347,8 @@ Outputs:
   GoldCrawler:
     Value: !Ref GoldCrawler
     Export: { Name: !Sub "${AWS::StackName}-GoldCrawler" }
+  DataBrewRoleArn:
+    Value: !GetAtt DataBrewRole.Arn
   Prefixo:
     Value: !Ref Prefixo
     Export: { Name: !Sub "${AWS::StackName}-Prefixo" }

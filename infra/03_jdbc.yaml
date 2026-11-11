@@ -1,0 +1,270 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Projeto de Disciplina - Pipelines ETL com AWS Glue Studio.
+  Stack 3 (fonte JDBC): banco RDS PostgreSQL com os cadastros (produtos e avioes),
+  conexao JDBC no Glue com senha no Secrets Manager, endpoints de VPC, crawler JDBC
+  e job que carrega os cadastros no banco.
+
+Parameters:
+  StackFundacao:
+    Type: String
+    Default: glue-pd-fundacao
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  RouteTableId:
+    Type: String
+    Description: Tabela de rotas principal da VPC (para o endpoint gateway do S3).
+  SubnetA:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet usada pelo Glue e pelos endpoints de interface.
+  SubnetB:
+    Type: AWS::EC2::Subnet::Id
+    Description: Segunda subnet (outra zona) exigida pelo grupo de subnets do RDS.
+  ZonaSubnetA:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Zona de disponibilidade da SubnetA.
+
+Resources:
+  # ---------------- Rede ----------------
+  SgGlueRds:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Glue, RDS e endpoints. Trafego apenas entre membros do proprio grupo.
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - { IpProtocol: "-1", CidrIp: 0.0.0.0/0 }
+      Tags: [{ Key: projeto, Value: glue-pd }, { Key: Name, Value: mro-sg-glue-rds }]
+
+  SgAutoReferencia:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SgGlueRds
+      IpProtocol: tcp
+      FromPort: 0
+      ToPort: 65535
+      SourceSecurityGroupId: !Ref SgGlueRds
+      Description: Exigencia do Glue para conexoes JDBC (regra autorreferenciada).
+
+  EndpointS3:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref RouteTableId]
+
+  EndpointGlue:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.glue"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref SubnetA]
+      SecurityGroupIds: [!Ref SgGlueRds]
+
+  EndpointSecrets:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref SubnetA]
+      SecurityGroupIds: [!Ref SgGlueRds]
+
+  EndpointLogs:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.logs"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref SubnetA]
+      SecurityGroupIds: [!Ref SgGlueRds]
+
+  # ---------------- Banco de dados ----------------
+  GrupoSubnetsRds:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnets do banco de cadastros
+      SubnetIds: [!Ref SubnetA, !Ref SubnetB]
+
+  BancoCadastros:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceIdentifier: mro-cadastros
+      Engine: postgres
+      DBInstanceClass: db.t4g.micro
+      AllocatedStorage: "20"
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: mro_cadastros
+      MasterUsername: mroadmin
+      ManageMasterUserPassword: true
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 0
+      DeletionProtection: false
+      DBSubnetGroupName: !Ref GrupoSubnetsRds
+      VPCSecurityGroups: [!Ref SgGlueRds]
+      Tags: [{ Key: projeto, Value: glue-pd }]
+
+  # ---------------- Glue ----------------
+  PermissaoSegredo:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: acesso-segredo-rds
+      Roles: [{ "Fn::ImportValue": !Sub "${StackFundacao}-GlueRoleName" }]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LerSenhaDoBanco
+            Effect: Allow
+            Action: [secretsmanager:GetSecretValue, secretsmanager:DescribeSecret]
+            Resource: !GetAtt BancoCadastros.MasterUserSecret.SecretArn
+          - Sid: LerConexao
+            Effect: Allow
+            Action: [glue:GetConnection]
+            Resource:
+              - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog"
+              - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:connection/mro-rds-postgres"
+
+  ConexaoJdbc:
+    Type: AWS::Glue::Connection
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      ConnectionInput:
+        Name: mro-rds-postgres
+        Description: Conexao JDBC com o banco de cadastros (senha no Secrets Manager).
+        ConnectionType: JDBC
+        ConnectionProperties:
+          JDBC_CONNECTION_URL: !Sub "jdbc:postgresql://${BancoCadastros.Endpoint.Address}:${BancoCadastros.Endpoint.Port}/mro_cadastros"
+          SECRET_ID: !GetAtt BancoCadastros.MasterUserSecret.SecretArn
+          JDBC_ENFORCE_SSL: "false"
+        PhysicalConnectionRequirements:
+          SubnetId: !Ref SubnetA
+          AvailabilityZone: !Ref ZonaSubnetA
+          SecurityGroupIdList: [!Ref SgGlueRds]
+
+  BancoCatalogoRds:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: mro_rds
+        Description: Fonte JDBC (RDS PostgreSQL) com os cadastros de produtos e avioes.
+
+  CrawlerRds:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: crawler_mro_rds
+      Description: Descobre as tabelas do banco de cadastros pela conexao JDBC.
+      Role: { "Fn::ImportValue": !Sub "${StackFundacao}-GlueRoleArn" }
+      DatabaseName: !Ref BancoCatalogoRds
+      Targets:
+        JdbcTargets:
+          - ConnectionName: !Ref ConexaoJdbc
+            Path: mro_cadastros/public/%
+      SchemaChangePolicy: { UpdateBehavior: UPDATE_IN_DATABASE, DeleteBehavior: LOG }
+      Tags: { projeto: glue-pd, camada: origem }
+
+  JobCargaRds:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: job_carga_rds
+      Description: Carrega os cadastros (produtos e avioes) no banco RDS pela conexao JDBC.
+      Role: { "Fn::ImportValue": !Sub "${StackFundacao}-GlueRoleArn" }
+      GlueVersion: "5.0"
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+      Timeout: 20
+      MaxRetries: 0
+      ExecutionProperty: { MaxConcurrentRuns: 1 }
+      SecurityConfiguration: { "Fn::ImportValue": !Sub "${StackFundacao}-SecurityConfiguration" }
+      Connections: { Connections: [!Ref ConexaoJdbc] }
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub
+          - "s3://${B}/scripts/job_carga_rds.py"
+          - { B: { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" } }
+      DefaultArguments:
+        "--job-bookmark-option": job-bookmark-disable
+        "--enable-metrics": "true"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--CONEXAO": mro-rds-postgres
+        "--DB_BRONZE": !Sub
+          - "${P}_bronze"
+          - { P: { "Fn::ImportValue": !Sub "${StackFundacao}-Prefixo" } }
+      Tags: { projeto: glue-pd, camada: origem }
+
+  # ---------------- CDC ----------------
+  JobSimulaAlteracoes:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: job_simula_alteracoes_rds
+      Description: Simula o sistema de origem alterando o cadastro (3 inserts, 2 updates, 1 delete).
+      Role: { "Fn::ImportValue": !Sub "${StackFundacao}-GlueRoleArn" }
+      GlueVersion: "5.0"
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+      Timeout: 15
+      MaxRetries: 0
+      ExecutionProperty: { MaxConcurrentRuns: 1 }
+      SecurityConfiguration: { "Fn::ImportValue": !Sub "${StackFundacao}-SecurityConfiguration" }
+      Connections: { Connections: [!Ref ConexaoJdbc] }
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub
+          - "s3://${B}/scripts/job_simula_alteracoes_rds.py"
+          - { B: { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" } }
+      DefaultArguments:
+        "--job-bookmark-option": job-bookmark-disable
+        "--enable-metrics": "true"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--CONEXAO": mro-rds-postgres
+      Tags: { projeto: glue-pd, camada: origem }
+
+  JobCdcProdutos:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: job_cdc_produtos
+      Description: CDC do cadastro de produtos (origem JDBC -> Silver), com log de inserts, updates e deletes.
+      Role: { "Fn::ImportValue": !Sub "${StackFundacao}-GlueRoleArn" }
+      GlueVersion: "5.0"
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+      Timeout: 15
+      MaxRetries: 0
+      ExecutionProperty: { MaxConcurrentRuns: 1 }
+      SecurityConfiguration: { "Fn::ImportValue": !Sub "${StackFundacao}-SecurityConfiguration" }
+      Connections: { Connections: [!Ref ConexaoJdbc] }
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub
+          - "s3://${B}/scripts/job_cdc_produtos.py"
+          - { B: { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" } }
+      DefaultArguments:
+        "--job-bookmark-option": job-bookmark-disable
+        "--enable-metrics": "true"
+        "--enable-continuous-cloudwatch-log": "true"
+        "--BUCKET": { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" }
+        "--DB_ORIGEM": !Ref BancoCatalogoRds
+        "--TABELA_ORIGEM": mro_cadastros_public_produtos
+        "--DB_SILVER": !Sub
+          - "${P}_silver"
+          - { P: { "Fn::ImportValue": !Sub "${StackFundacao}-Prefixo" } }
+      Tags: { projeto: glue-pd, camada: silver }
+
+Outputs:
+  EnderecoBanco:
+    Value: !GetAtt BancoCadastros.Endpoint.Address
+  SegredoBanco:
+    Value: !GetAtt BancoCadastros.MasterUserSecret.SecretArn
+  Conexao:
+    Value: !Ref ConexaoJdbc
