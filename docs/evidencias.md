@@ -57,3 +57,26 @@
 | 53 | [imagem-53.png](../imagens/imagem-53.png) | Tabelas da camada Bronze no Catalog |
 | 54 | [imagem-54.png](../imagens/imagem-54.png) | Tabelas da camada Silver no Catalog |
 | 55 | [imagem-55.png](../imagens/imagem-55.png) | Tabelas da camada Gold no Catalog |
+| 56 | [imagem-56.png](../imagens/imagem-56.png) | DataBrew dataset bronze-faturas a partir do Data Catalog |
+| 57 | [imagem-57.png](../imagens/imagem-57.png) | DataBrew estatísticas de PII habilitadas |
+| 58 | [imagem-58.png](../imagens/imagem-58.png) | DataBrew perfil com identificação automática de PII |
+| 59 | [imagem-59.png](../imagens/imagem-59.png) | DataBrew coluna responsible_email identificada como E-mail |
+| 60 | [imagem-60.png](../imagens/imagem-60.png) | DataBrew coluna item falso positivo de PII |
+| 61 | [imagem-61.png](../imagens/imagem-61.png) | DataBrew receita de limpeza com 3 etapas |
+| 62 | [imagem-62.png](../imagens/imagem-62.png) | DataBrew linhagem receita, job e saída Parquet no S3 |
+| 63 | [imagem-63.png](../imagens/imagem-63.png) | DataBrew job de receita limpeza-bronze-faturas concluido com exito |
+| 64 | [imagem-64.png](../imagens/imagem-64.png) | CloudFormation stack glue-pd-jdbc com 13 recursos criados |
+| 65 | [imagem-65.png](../imagens/imagem-65.png) | CloudShell deploy da stack glue-pd-jdbc concluido |
+| 66 | [imagem-66.png](../imagens/imagem-66.png) | Data Catalog com 4 bancos incluindo mro_rds fonte JDBC |
+| 67 | [imagem-67.png](../imagens/imagem-67.png) | Conexao JDBC mro-rds-postgres com URL subnet e security group |
+| 68 | [imagem-68.png](../imagens/imagem-68.png) | job_carga_rds Succeeded carga dos cadastros no RDS via JDBC |
+| 69 | [imagem-69.png](../imagens/imagem-69.png) | crawler_mro_rds Completed 2 tabelas JDBC catalogadas |
+| 70 | [imagem-70.png](../imagens/imagem-70.png) | Tabela JDBC mro_cadastros_public_produtos classification postgresql e schema |
+| 71 | [imagem-71.png](../imagens/imagem-71.png) | Job de dimensoes com a conexao JDBC mro-rds-postgres associada |
+| 72 | [imagem-72.png](../imagens/imagem-72.png) | Job visual origem_avioes lendo da tabela JDBC mro_rds |
+| 73 | [imagem-73.png](../imagens/imagem-73.png) | Job visual origem_produtos lendo da tabela JDBC mro_rds |
+| 74 | [imagem-74.png](../imagens/imagem-74.png) | job de dimensoes Succeeded lendo do RDS via JDBC |
+| 75 | [imagem-75.png](../imagens/imagem-75.png) | job_simula_alteracoes_rds Succeeded mudancas no cadastro de origem |
+| 76 | [imagem-76.png](../imagens/imagem-76.png) | job_cdc_produtos Succeeded captura de mudancas |
+| 77 | [imagem-77.png](../imagens/imagem-77.png) | Athena log do CDC com inserts updates e delete |
+| 78 | [imagem-78.png](../imagens/imagem-78.png) | Stack glue-pd-jdbc apagada apos os testes JDBC e CDC |
