@@ -4,7 +4,7 @@ Projeto da disciplina **Pipelines ETL com AWS Glue Studio**, da Pós-Graduação
 
 Pipeline de dados na AWS que leva arquivos brutos até um modelo analítico consultado pelo Amazon Athena, com transformações no **AWS Glue Studio** e metadados governados no **Glue Data Catalog**. Foi meu primeiro projeto prático com o Glue, e este repositório registra o resultado e o que aprendi pelo caminho.
 
-**Aluna:** [seu nome] · **Região AWS:** us-east-2 (Ohio) · **Glue:** 5.0
+**Aluna:** Nadia Guimaraes · **Região AWS:** us-east-2 (Ohio) · **Glue:** 5.0
 
 ## O que o pipeline faz
 
@@ -37,6 +37,13 @@ Um centro de manutenção de aeronaves (MRO) registra cada compra de ferramenta 
 - `job_bronze_silver_dimensoes`: job visual com dois ramos (produtos e aviões).
 - `job_silver_gold_modelo`: job Spark que monta o esquema estrela.
 - `wf_mro_pipeline`: crawler Bronze → 2 jobs Silver em paralelo → job Gold → crawler Gold.
+- `job_carga_rds`, `crawler_mro_rds`: fonte **JDBC** (RDS PostgreSQL, senha no Secrets Manager) catalogada no banco `mro_rds`.
+- `job_cdc_produtos`: **CDC** do cadastro no banco para a Silver, com log de inclusões, alterações e exclusões (`mro_silver.cdc_produtos`).
+- **Glue DataBrew**: perfil da Bronze com detecção de PII e receita de limpeza (`limpeza-faturas`).
+
+| Log do CDC no Athena | Perfil com PII no DataBrew |
+|---|---|
+| ![CDC](imagens/imagem-77.png) | ![DataBrew](imagens/imagem-58.png) |
 
 | Job visual de faturas | Workflow concluído |
 |---|---|
@@ -64,12 +71,12 @@ Um centro de manutenção de aeronaves (MRO) registra cada compra de ferramenta 
 ## Estrutura do repositório
 
 ```
-infra/       CloudFormation (fundação e orquestração) e script implantar.sh
-jobs/        scripts equivalentes aos jobs visuais e o job Gold
+infra/       CloudFormation (fundação, orquestração e fonte JDBC/CDC) e script implantar.sh
+jobs/        scripts dos jobs (visuais em script, Gold, carga JDBC, CDC)
 governanca/  regras de Data Quality, script de metadados e consultas do Athena
 dados/       arquivos da disciplina e o gerador do conjunto ampliado
 testes/      validação local da lógica e números de referência
-imagens/     55 capturas de tela da execução
+imagens/     77 capturas de tela da execução
 docs/        relatório (Word), arquitetura e lista de evidências
 ```
 
@@ -85,10 +92,13 @@ python3 dados/gerar_dados.py
 # montar os jobs visuais no Glue Studio (ou: ./infra/implantar.sh orquestracao false)
 ./infra/implantar.sh orquestracao
 ./infra/implantar.sh lote2
+# fonte JDBC + CDC (opcional; o banco RDS custa enquanto existir)
+aws cloudformation deploy --stack-name glue-pd-jdbc --template-file infra/03_jdbc.yaml \
+  --capabilities CAPABILITY_NAMED_IAM --parameter-overrides VpcId=... RouteTableId=... SubnetA=... SubnetB=... ZonaSubnetA=...
 ./infra/implantar.sh limpar   # apaga tudo no final
 ```
 
 ## Documentos
 
-- [Relatório do trabalho (Word)](docs/relatorio.docx)
+- [Relatório do trabalho (PDF)](docs/relatorio.pdf) · [Word](docs/relatorio.docx)
 - [Lista completa de evidências](docs/evidencias.md)
