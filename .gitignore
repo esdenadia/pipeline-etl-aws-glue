@@ -1,0 +1,12 @@
+# dados gerados (podem ser recriados com dados/gerar_dados.py)
+dados/saida/
+
+# credenciais e arquivos locais: nunca enviar
+*credentials*.csv
+*.pem
+.env
+.aws/
+
+# Python
+__pycache__/
+*.pyc
