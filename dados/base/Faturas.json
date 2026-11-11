@@ -1,0 +1,10 @@
+{"code": 1, "date": "2025-08-01", "item": "Martelo", "price": 15.75, "description": "Martelo de unha com cabo de fibra de vidro"}
+{"code": 2, "date": "2025-08-02", "item": "Jogo de Chaves de Fenda", "price": 22.50, "responsible": "John Smith"}
+{"code": 3, "date": "2025-08-05", "item": "Chave Inglesa", "price": 12.00}
+{"code": 4, "date": "2025-08-07", "item": "Alicate", "price": 9.99, "description": "Alicate de bico meia-cana de 6 polegadas", "responsible": "Jane Doe"}
+{"code": 5, "date": "2025-08-10", "item": "Trena", "price": 7.25}
+{"code": 6, "date": "2025-08-12", "item": "Brocas", "price": 18.50, "description": "Jogo de brocas de titânio"}
+{"code": 7, "date": "2025-08-15", "item": "Nível", "price": 24.00, "responsible": "Peter Jones"}
+{"code": 8, "date": "2025-08-18", "item": "Estilete", "price": 5.50, "description": "Estilete com lâmina retrátil"}
+{"code": 9, "date": "2025-08-22", "item": "Óculos de Proteção", "price": 8.00, "description": "Óculos de segurança antirreflexo", "responsible": "Mary Williams"}
+{"code": 10, "date": "2025-08-25", "item": "Luvas", "price": 11.75}

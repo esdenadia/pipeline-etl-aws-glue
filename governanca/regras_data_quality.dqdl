@@ -1,0 +1,15 @@
+# Ruleset DQDL - camada Silver / faturas
+# Usado no no "Evaluate Data Quality" do job job_bronze_silver_faturas
+# (cole o bloco Rules = [...] no editor de regras do no).
+Rules = [
+    RowCount > 0,
+    IsComplete "codigo_fatura",
+    IsUnique "codigo_fatura",
+    IsComplete "data_fatura",
+    IsComplete "chave_produto",
+    ColumnValues "preco_unitario" > 0,
+    ColumnValues "quantidade" > 0,
+    ColumnValues "quantidade" <= 100,
+    ColumnValues "codigo_aeronave" <= 30 with threshold > 0.99,
+    Completeness "responsavel" > 0.4
+]

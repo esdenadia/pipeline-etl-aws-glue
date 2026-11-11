@@ -1,0 +1,255 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Projeto de Disciplina - Pipelines ETL com AWS Glue Studio.
+  Stack 2 (orquestracao): job Gold (modelo dimensional), Workflow e gatilhos encadeados.
+  Opcionalmente cria tambem os jobs Bronze->Silver a partir dos scripts (se voce NAO os montou no editor visual).
+
+Parameters:
+  StackFundacao:
+    Type: String
+    Default: glue-pd-fundacao
+    Description: Nome da stack criada com 01_fundacao.yaml.
+  UsarJobsVisuais:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      true = os jobs job_bronze_silver_faturas e job_bronze_silver_dimensoes ja foram criados no Glue Studio (visual).
+      false = esta stack cria esses jobs a partir dos scripts em s3://<bucket>/scripts/.
+  NumeroWorkers:
+    Type: Number
+    Default: 2
+    MinValue: 2
+    MaxValue: 10
+    Description: Workers G.1X por job (2 = menor custo; aumente se o tempo ficar alto).
+
+Conditions:
+  CriarJobsScript: !Equals [!Ref UsarJobsVisuais, "false"]
+
+Resources:
+  JobFaturas:
+    Type: AWS::Glue::Job
+    Condition: CriarJobsScript
+    Properties:
+      Name: job_bronze_silver_faturas
+      Description: Bronze -> Silver das faturas (incremental com Job Bookmark, DQ, mascaramento de PII).
+      Role: { "Fn::ImportValue": !Sub "${StackFundacao}-GlueRoleArn" }
+      GlueVersion: "5.0"
+      WorkerType: G.1X
+      NumberOfWorkers: !Ref NumeroWorkers
+      Timeout: 30
+      MaxRetries: 1
+      ExecutionProperty: { MaxConcurrentRuns: 1 }
+      SecurityConfiguration: { "Fn::ImportValue": !Sub "${StackFundacao}-SecurityConfiguration" }
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub
+          - "s3://${B}/scripts/job_bronze_silver_faturas.py"
+          - { B: { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" } }
+      DefaultArguments:
+        "--job-bookmark-option": job-bookmark-enable
+        "--enable-metrics": "true"
+        "--enable-observability-metrics": "true"
+        "--enable-job-insights": "true"
+        "--enable-glue-datacatalog": "true"
+        "--enable-spark-ui": "true"
+        "--spark-event-logs-path": !Sub
+          - "s3://${B}/sparkui/"
+          - { B: { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" } }
+        "--TempDir": !Sub
+          - "s3://${B}/temp/"
+          - { B: { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" } }
+        "--BUCKET": { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" }
+        "--DB_BRONZE": !Sub
+          - "${P}_bronze"
+          - { P: { "Fn::ImportValue": !Sub "${StackFundacao}-Prefixo" } }
+        "--DB_SILVER": !Sub
+          - "${P}_silver"
+          - { P: { "Fn::ImportValue": !Sub "${StackFundacao}-Prefixo" } }
+      Tags: { projeto: glue-pd, camada: silver }
+
+  JobDimensoes:
+    Type: AWS::Glue::Job
+    Condition: CriarJobsScript
+    Properties:
+      Name: job_bronze_silver_dimensoes
+      Description: Bronze -> Silver das dimensoes produtos (JSON) e avioes (CSV), com snapshot por data_carga.
+      Role: { "Fn::ImportValue": !Sub "${StackFundacao}-GlueRoleArn" }
+      GlueVersion: "5.0"
+      WorkerType: G.1X
+      NumberOfWorkers: 2
+      Timeout: 15
+      MaxRetries: 1
+      ExecutionProperty: { MaxConcurrentRuns: 1 }
+      SecurityConfiguration: { "Fn::ImportValue": !Sub "${StackFundacao}-SecurityConfiguration" }
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub
+          - "s3://${B}/scripts/job_bronze_silver_dimensoes.py"
+          - { B: { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" } }
+      DefaultArguments:
+        "--job-bookmark-option": job-bookmark-disable
+        "--enable-metrics": "true"
+        "--enable-observability-metrics": "true"
+        "--enable-glue-datacatalog": "true"
+        "--TempDir": !Sub
+          - "s3://${B}/temp/"
+          - { B: { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" } }
+        "--BUCKET": { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" }
+        "--DB_BRONZE": !Sub
+          - "${P}_bronze"
+          - { P: { "Fn::ImportValue": !Sub "${StackFundacao}-Prefixo" } }
+        "--DB_SILVER": !Sub
+          - "${P}_silver"
+          - { P: { "Fn::ImportValue": !Sub "${StackFundacao}-Prefixo" } }
+      Tags: { projeto: glue-pd, camada: silver }
+
+  JobGold:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: job_silver_gold_modelo
+      Description: Silver -> Gold. Modelo dimensional (fato_faturas + dimensoes) e agregado mensal. Idempotente (overwrite).
+      Role: { "Fn::ImportValue": !Sub "${StackFundacao}-GlueRoleArn" }
+      GlueVersion: "5.0"
+      WorkerType: G.1X
+      NumberOfWorkers: !Ref NumeroWorkers
+      Timeout: 30
+      MaxRetries: 1
+      ExecutionProperty: { MaxConcurrentRuns: 1 }
+      SecurityConfiguration: { "Fn::ImportValue": !Sub "${StackFundacao}-SecurityConfiguration" }
+      Command:
+        Name: glueetl
+        PythonVersion: "3"
+        ScriptLocation: !Sub
+          - "s3://${B}/scripts/job_silver_gold_modelo.py"
+          - { B: { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" } }
+      DefaultArguments:
+        "--job-bookmark-option": job-bookmark-disable
+        "--enable-metrics": "true"
+        "--enable-observability-metrics": "true"
+        "--enable-job-insights": "true"
+        "--enable-glue-datacatalog": "true"
+        "--enable-spark-ui": "true"
+        "--spark-event-logs-path": !Sub
+          - "s3://${B}/sparkui/"
+          - { B: { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" } }
+        "--TempDir": !Sub
+          - "s3://${B}/temp/"
+          - { B: { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" } }
+        "--BUCKET": { "Fn::ImportValue": !Sub "${StackFundacao}-Bucket" }
+        "--DB_SILVER": !Sub
+          - "${P}_silver"
+          - { P: { "Fn::ImportValue": !Sub "${StackFundacao}-Prefixo" } }
+        "--PREFIXO_GOLD": gold
+      Tags: { projeto: glue-pd, camada: gold }
+
+  # ------------------------------------------------------------------ Workflow
+  Workflow:
+    Type: AWS::Glue::Workflow
+    Properties:
+      Name: wf_mro_pipeline
+      Description: "Bronze (crawler) -> Silver (2 jobs em paralelo) -> Gold (modelo) -> Catalog Gold (crawler)"
+      MaxConcurrentRuns: 1
+      DefaultRunProperties: { ambiente: dev, projeto: glue-pd }
+      Tags: { projeto: glue-pd }
+
+  TriggerInicio:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: trg_01_inicio
+      Description: Inicio manual (ON_DEMAND). Para agendar, troque por SCHEDULED com cron(0 6 * * ? *).
+      WorkflowName: !Ref Workflow
+      Type: ON_DEMAND
+      Actions:
+        - CrawlerName: { "Fn::ImportValue": !Sub "${StackFundacao}-BronzeCrawler" }
+
+  TriggerSilver:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: trg_02_silver
+      Description: Apos o crawler da Bronze, roda os dois jobs Bronze->Silver em paralelo.
+      WorkflowName: !Ref Workflow
+      Type: CONDITIONAL
+      StartOnCreation: true
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            CrawlerName: { "Fn::ImportValue": !Sub "${StackFundacao}-BronzeCrawler" }
+            CrawlState: SUCCEEDED
+      Actions:
+        - JobName: !If [CriarJobsScript, !Ref JobFaturas, job_bronze_silver_faturas]
+        - JobName: !If [CriarJobsScript, !Ref JobDimensoes, job_bronze_silver_dimensoes]
+
+  TriggerGold:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: trg_03_gold
+      Description: So constroi a Gold quando AMBOS os jobs da Silver terminam com sucesso.
+      WorkflowName: !Ref Workflow
+      Type: CONDITIONAL
+      StartOnCreation: true
+      Predicate:
+        Logical: AND
+        Conditions:
+          - LogicalOperator: EQUALS
+            JobName: !If [CriarJobsScript, !Ref JobFaturas, job_bronze_silver_faturas]
+            State: SUCCEEDED
+          - LogicalOperator: EQUALS
+            JobName: !If [CriarJobsScript, !Ref JobDimensoes, job_bronze_silver_dimensoes]
+            State: SUCCEEDED
+      Actions:
+        - JobName: !Ref JobGold
+
+  TriggerCatalogoGold:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: trg_04_catalogo_gold
+      Description: Atualiza o Data Catalog da camada Gold depois do job de modelagem.
+      WorkflowName: !Ref Workflow
+      Type: CONDITIONAL
+      StartOnCreation: true
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            JobName: !Ref JobGold
+            State: SUCCEEDED
+      Actions:
+        - CrawlerName: { "Fn::ImportValue": !Sub "${StackFundacao}-GoldCrawler" }
+
+  # ------------------------------------------------------------------ Alerta de falha (monitoramento)
+  RegraFalhaGlue:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: mro-glue-job-falhou
+      Description: Captura falhas/timeouts dos jobs do projeto (veja no EventBridge > Regras > Monitoramento).
+      State: ENABLED
+      EventPattern:
+        source: ["aws.glue"]
+        detail-type: ["Glue Job State Change"]
+        detail:
+          jobName: [job_bronze_silver_faturas, job_bronze_silver_dimensoes, job_silver_gold_modelo]
+          state: [FAILED, TIMEOUT, ERROR]
+      Targets:
+        - Arn: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LogGroupFalhas}"
+          Id: log-falhas
+
+  LogGroupFalhas:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/events/mro-glue-falhas
+      RetentionInDays: 30
+
+  LogGroupFalhasPolicy:
+    Type: AWS::Logs::ResourcePolicy
+    Properties:
+      PolicyName: mro-eventbridge-para-logs
+      PolicyDocument: !Sub |
+        {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":["events.amazonaws.com","delivery.logs.amazonaws.com"]},"Action":["logs:CreateLogStream","logs:PutLogEvents"],"Resource":"${LogGroupFalhas.Arn}"}]}
+
+Outputs:
+  Workflow:
+    Value: !Ref Workflow
+  JobGold:
+    Value: !Ref JobGold

@@ -1,0 +1,317 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Projeto de Disciplina - Pipelines ETL com AWS Glue Studio.
+  Stack 1 (fundacao): Data Lake S3 em camadas, IAM, Glue Data Catalog (bancos por camada),
+  classificador, crawlers, configuracao de seguranca, workgroup Athena e perfil de acesso de analistas.
+
+Parameters:
+  Prefixo:
+    Type: String
+    Default: mro
+    AllowedPattern: "^[a-z][a-z0-9-]{1,15}$"
+    Description: Prefixo minusculo usado nos nomes dos recursos.
+
+Resources:
+  # ------------------------------------------------------------------ S3 (Data Lake)
+  DataLakeBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub "${Prefixo}-datalake-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: bronze-arquivamento
+            Status: Enabled
+            Prefix: bronze/
+            Transitions:
+              - StorageClass: GLACIER_IR
+                TransitionInDays: 90
+          - Id: temporarios-expiram
+            Status: Enabled
+            Prefix: temp/
+            ExpirationInDays: 7
+          - Id: resultados-athena-expiram
+            Status: Enabled
+            Prefix: athena-results/
+            ExpirationInDays: 30
+          - Id: sparkui-expira
+            Status: Enabled
+            Prefix: sparkui/
+            ExpirationInDays: 30
+          - Id: multipart-incompleto
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+      Tags:
+        - { Key: projeto, Value: glue-pd }
+        - { Key: camada, Value: datalake }
+
+  DataLakeBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DataLakeBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SomenteTLS
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt DataLakeBucket.Arn
+              - !Sub "${DataLakeBucket.Arn}/*"
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
+
+  # ------------------------------------------------------------------ IAM
+  GlueServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Prefixo}-glue-service-role"
+      Description: Role assumida pelos jobs e crawlers do Glue (menor privilegio no bucket do lake).
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: glue.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSGlueServiceRole"
+      Policies:
+        - PolicyName: acesso-datalake
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ListarBucket
+                Effect: Allow
+                Action: [s3:ListBucket, s3:GetBucketLocation]
+                Resource: !GetAtt DataLakeBucket.Arn
+              - Sid: LerBronzeEScripts
+                Effect: Allow
+                Action: [s3:GetObject]
+                Resource:
+                  - !Sub "${DataLakeBucket.Arn}/bronze/*"
+                  - !Sub "${DataLakeBucket.Arn}/scripts/*"
+              - Sid: LerEscreverCamadasProcessadas
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource:
+                  - !Sub "${DataLakeBucket.Arn}/silver/*"
+                  - !Sub "${DataLakeBucket.Arn}/gold/*"
+                  - !Sub "${DataLakeBucket.Arn}/temp/*"
+                  - !Sub "${DataLakeBucket.Arn}/sparkui/*"
+                  - !Sub "${DataLakeBucket.Arn}/dq-results/*"
+              - Sid: MarcadoresDePastaDoSpark
+                Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+                Resource: !Sub "${DataLakeBucket.Arn}/*_$folder$"
+      Tags:
+        - { Key: projeto, Value: glue-pd }
+
+  AnalistasGoldPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${Prefixo}-analista-gold-somente-leitura"
+      Description: Analistas consultam APENAS a camada Gold via Athena (sem acesso a Bronze/Silver).
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AthenaNoWorkgroupDoProjeto
+            Effect: Allow
+            Action:
+              - athena:StartQueryExecution
+              - athena:GetQueryExecution
+              - athena:GetQueryResults
+              - athena:StopQueryExecution
+              - athena:GetWorkGroup
+              - athena:ListQueryExecutions
+            Resource: !Sub "arn:${AWS::Partition}:athena:${AWS::Region}:${AWS::AccountId}:workgroup/${Prefixo}_wg"
+          - Sid: CatalogoSomenteGold
+            Effect: Allow
+            Action: [glue:GetDatabase, glue:GetDatabases, glue:GetTable, glue:GetTables, glue:GetPartition, glue:GetPartitions]
+            Resource:
+              - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:catalog"
+              - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:database/${Prefixo}_gold"
+              - !Sub "arn:${AWS::Partition}:glue:${AWS::Region}:${AWS::AccountId}:table/${Prefixo}_gold/*"
+          - Sid: ListarSomenteGoldEResultados
+            Effect: Allow
+            Action: s3:ListBucket
+            Resource: !GetAtt DataLakeBucket.Arn
+            Condition:
+              StringLike: { "s3:prefix": ["gold/*", "athena-results/*"] }
+          - Sid: LerGold
+            Effect: Allow
+            Action: s3:GetObject
+            Resource: !Sub "${DataLakeBucket.Arn}/gold/*"
+          - Sid: ResultadosAthena
+            Effect: Allow
+            Action: [s3:GetObject, s3:PutObject, s3:GetBucketLocation]
+            Resource:
+              - !Sub "${DataLakeBucket.Arn}/athena-results/*"
+              - !GetAtt DataLakeBucket.Arn
+
+  AnalistasRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Prefixo}-analista-role"
+      Description: Perfil de analista (somente camada Gold via Athena). Substitui o grupo IAM, bloqueado por SCP nesta conta.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root" }
+            Action: sts:AssumeRole
+      ManagedPolicyArns: [!Ref AnalistasGoldPolicy]
+      Tags:
+        - { Key: projeto, Value: glue-pd }
+
+  # ------------------------------------------------------------------ Glue Data Catalog
+  BronzeDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Sub "${Prefixo}_bronze"
+        Description: "Camada Bronze (ingestao): dados brutos como chegaram da origem (JSON/CSV), imutaveis."
+        LocationUri: !Sub "s3://${DataLakeBucket}/bronze/"
+        Parameters: { camada: bronze, formato: "json,csv", dono: engenharia-dados, sensibilidade: restrito }
+
+  SilverDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Sub "${Prefixo}_silver"
+        Description: "Camada Silver (processamento): dados limpos, tipados, deduplicados e com PII mascarada (Parquet)."
+        LocationUri: !Sub "s3://${DataLakeBucket}/silver/"
+        Parameters: { camada: silver, formato: parquet, dono: engenharia-dados, sensibilidade: interno }
+
+  GoldDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Sub "${Prefixo}_gold"
+        Description: "Camada Gold (consumo): modelo dimensional (fatos e dimensoes) e agregados para BI/Athena."
+        LocationUri: !Sub "s3://${DataLakeBucket}/gold/"
+        Parameters: { camada: gold, formato: parquet, dono: engenharia-dados, sensibilidade: interno }
+
+  CsvComCabecalhoClassifier:
+    Type: AWS::Glue::Classifier
+    Properties:
+      CsvClassifier:
+        Name: !Sub "${Prefixo}-csv-com-cabecalho"
+        Delimiter: ","
+        QuoteSymbol: '"'
+        ContainsHeader: PRESENT
+        AllowSingleColumn: false
+
+  GlueSecurityConfiguration:
+    Type: AWS::Glue::SecurityConfiguration
+    Properties:
+      Name: !Sub "${Prefixo}-sc-sse-s3"
+      EncryptionConfiguration:
+        S3Encryptions:
+          - S3EncryptionMode: SSE-S3
+        CloudWatchEncryption:
+          CloudWatchEncryptionMode: DISABLED
+        JobBookmarksEncryption:
+          JobBookmarksEncryptionMode: DISABLED
+
+  BronzeCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: !Sub "crawler_${Prefixo}_bronze"
+      Description: Descobre esquema e particoes (ingest_date) das fontes brutas. Recrawl incremental.
+      Role: !GetAtt GlueServiceRole.Arn
+      DatabaseName: !Ref BronzeDatabase
+      Classifiers: [!Ref CsvComCabecalhoClassifier]
+      CrawlerSecurityConfiguration: !Ref GlueSecurityConfiguration
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://${DataLakeBucket}/bronze/faturas/"
+          - Path: !Sub "s3://${DataLakeBucket}/bronze/produtos/"
+          - Path: !Sub "s3://${DataLakeBucket}/bronze/avioes/"
+      RecrawlPolicy:
+        RecrawlBehavior: CRAWL_NEW_FOLDERS_ONLY
+      SchemaChangePolicy:
+        UpdateBehavior: LOG
+        DeleteBehavior: LOG
+      Configuration: '{"Version":1.0,"Grouping":{"TableGroupingPolicy":"CombineCompatibleSchemas"},"CrawlerOutput":{"Partitions":{"AddOrUpdateBehavior":"InheritFromTable"}}}'
+      Tags: { projeto: glue-pd, camada: bronze }
+
+  GoldCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: !Sub "crawler_${Prefixo}_gold"
+      Description: Registra/atualiza no Catalog as tabelas do modelo dimensional gravadas pelo job Gold.
+      Role: !GetAtt GlueServiceRole.Arn
+      DatabaseName: !Ref GoldDatabase
+      CrawlerSecurityConfiguration: !Ref GlueSecurityConfiguration
+      Targets:
+        S3Targets:
+          - { Path: !Sub "s3://${DataLakeBucket}/gold/dim_produto/", Exclusions: ["**_SUCCESS"] }
+          - { Path: !Sub "s3://${DataLakeBucket}/gold/dim_aeronave/", Exclusions: ["**_SUCCESS"] }
+          - { Path: !Sub "s3://${DataLakeBucket}/gold/dim_tempo/", Exclusions: ["**_SUCCESS"] }
+          - { Path: !Sub "s3://${DataLakeBucket}/gold/fato_faturas/", Exclusions: ["**_SUCCESS"] }
+          - { Path: !Sub "s3://${DataLakeBucket}/gold/agg_gastos_mensais/", Exclusions: ["**_SUCCESS"] }
+      RecrawlPolicy:
+        RecrawlBehavior: CRAWL_EVERYTHING
+      SchemaChangePolicy:
+        UpdateBehavior: UPDATE_IN_DATABASE
+        DeleteBehavior: DEPRECATE_IN_DATABASE
+      Configuration: '{"Version":1.0,"CrawlerOutput":{"Tables":{"AddOrUpdateBehavior":"MergeNewColumns"},"Partitions":{"AddOrUpdateBehavior":"InheritFromTable"}}}'
+      Tags: { projeto: glue-pd, camada: gold }
+
+  # ------------------------------------------------------------------ Athena
+  AthenaWorkGroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: !Sub "${Prefixo}_wg"
+      Description: Workgroup do projeto com limite de dados lidos por consulta (controle de custo).
+      RecursiveDeleteOption: true
+      State: ENABLED
+      WorkGroupConfiguration:
+        EnforceWorkGroupConfiguration: true
+        PublishCloudWatchMetricsEnabled: true
+        BytesScannedCutoffPerQuery: 1073741824
+        ResultConfiguration:
+          OutputLocation: !Sub "s3://${DataLakeBucket}/athena-results/"
+          EncryptionConfiguration:
+            EncryptionOption: SSE_S3
+
+Outputs:
+  Bucket:
+    Value: !Ref DataLakeBucket
+    Export: { Name: !Sub "${AWS::StackName}-Bucket" }
+  GlueRoleArn:
+    Value: !GetAtt GlueServiceRole.Arn
+    Export: { Name: !Sub "${AWS::StackName}-GlueRoleArn" }
+  GlueRoleName:
+    Value: !Ref GlueServiceRole
+    Export: { Name: !Sub "${AWS::StackName}-GlueRoleName" }
+  SecurityConfiguration:
+    Value: !Ref GlueSecurityConfiguration
+    Export: { Name: !Sub "${AWS::StackName}-SecurityConfiguration" }
+  BronzeCrawler:
+    Value: !Ref BronzeCrawler
+    Export: { Name: !Sub "${AWS::StackName}-BronzeCrawler" }
+  GoldCrawler:
+    Value: !Ref GoldCrawler
+    Export: { Name: !Sub "${AWS::StackName}-GoldCrawler" }
+  Prefixo:
+    Value: !Ref Prefixo
+    Export: { Name: !Sub "${AWS::StackName}-Prefixo" }

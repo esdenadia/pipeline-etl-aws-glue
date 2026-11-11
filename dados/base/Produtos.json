@@ -1,0 +1,4 @@
+{"id": 1, "product": "Notebook", "category": "Eletrônicos", "price": "1200.50", "available": true}
+{"id": 2, "product": "Teclado", "category": "Acessórios", "price": "75.00", "available": true}
+{"id": 3, "product": "Monitor", "category": "Eletrônicos", "price": "300.99", "available": false}
+{"id": 4, "product": "Mouse", "category": "Acessórios", "price": "25.20", "available": true}

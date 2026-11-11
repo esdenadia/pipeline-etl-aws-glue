@@ -1,0 +1,91 @@
+{
+  "lote1": {
+    "lote": "lote1",
+    "arquivos_bronze": 4272,
+    "mb_bronze": 174.5,
+    "kb_medio_arquivo": 41.8,
+    "registros_bronze": 876170,
+    "quarentena": 5180,
+    "quarentena_preco_nulo": 3484,
+    "quarentena_preco_negativo": 1696,
+    "duplicados_removidos": 1807,
+    "gravados_silver": 869183,
+    "particoes_ano_mes": 6,
+    "segundos": 19.8
+  },
+  "lote2": {
+    "lote": "lote2",
+    "arquivos_bronze": 1467,
+    "mb_bronze": 66.4,
+    "kb_medio_arquivo": 46.3,
+    "registros_bronze": 332076,
+    "quarentena": 1959,
+    "quarentena_preco_nulo": 1315,
+    "quarentena_preco_negativo": 644,
+    "duplicados_removidos": 700,
+    "gravados_silver": 329417,
+    "particoes_ano_mes": 2,
+    "segundos": 7.5
+  },
+  "silver_total": 1198600,
+  "silver_codigos_unicos_entre_lotes": true,
+  "gold": {
+    "dim_produto": 61,
+    "dim_aeronave": 31,
+    "dim_tempo": 243,
+    "fato_faturas": 1198600,
+    "agg_gastos_mensais": 1799
+  },
+  "idempotente": true,
+  "fato_sem_produto": 0,
+  "fato_sem_aeronave": 2383,
+  "valor_total_fato": 510041841.27,
+  "valor_total_agg": 510041841.27,
+  "dq_silver": {
+    "RowCount": 1198600,
+    "IsUnique codigo_fatura": true,
+    "ColumnValues preco_unitario > 0": true,
+    "ColumnValues quantidade <= 100": true,
+    "pct codigo_aeronave <= 30": 99.801,
+    "Completeness responsavel": 0.5506
+  },
+  "exemplo_email_hash": {
+    "responsavel": "Ana Souza",
+    "email_responsavel": "f9b1f81a703fc68fb2bdc808e36cb7cc128236a322d781644ca5ccbc18063b4d"
+  },
+  "top_categorias": {
+    "Eletrônicos": 146545764.92,
+    "Acessórios": 64016088.67,
+    "Equipamentos de Solo": 57479311.34,
+    "EPI": 56391724.5,
+    "Medição": 46946124.28,
+    "Consumíveis": 44960749.1
+  },
+  "top_fabricantes": {
+    "Lockheed Martin": 50579386.09,
+    "McDonnell Douglas/Boeing": 34259074.38,
+    "Sukhoi": 34187841.63,
+    "Mikoyan": 33696555.11,
+    "Dassault Aviation": 33567086.55
+  },
+  "gasto_mensal": {
+    "2025-01": 60115558.35,
+    "2025-02": 55531466.31,
+    "2025-03": 61498626.19,
+    "2025-04": 61844337.55,
+    "2025-05": 65118925.17,
+    "2025-06": 65694490.56,
+    "2025-07": 71422122.48,
+    "2025-08": 68816314.66
+  },
+  "faturas_por_mes": {
+    "2025-01": 142618,
+    "2025-02": 129999,
+    "2025-03": 144384,
+    "2025-04": 146083,
+    "2025-05": 153196,
+    "2025-06": 152903,
+    "2025-07": 167326,
+    "2025-08": 162091
+  }
+}
